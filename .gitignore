@@ -1,0 +1,22 @@
+# Secretos
+.env
+backend/.env
+
+# Base de datos local y datos exportados de Jira
+backend/instance/
+*.db
+backend/jira_assets_export.json
+backend/migration_output.txt
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Editor / Claude
+.claude/settings.local.json

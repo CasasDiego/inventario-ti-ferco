@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jira-assets-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_TOKEN=${JIRA_TOKEN}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - FLASK_ENV=production
+    volumes:
+      - ./backend:/app
+      - ./backend/jira_assets.db:/app/jira_assets.db
+    command: python app.py
+    networks:
+      - jira-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: jira-assets-frontend
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    depends_on:
+      - backend
+    networks:
+      - jira-network
+    restart: unless-stopped
+
+networks:
+  jira-network:
+    driver: bridge
+
+volumes:
+  backend_data:
+    driver: local

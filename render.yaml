@@ -1,0 +1,45 @@
+# Blueprint de Render: backend Flask (web service) + frontend React (sitio estático).
+# La base de datos NO vive aquí: es un Postgres gratuito externo (Neon o Supabase) vía DATABASE_URL.
+services:
+  - type: web
+    name: ferco-assets-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Un solo worker: el estado del sync vive en memoria del proceso
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120 app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
+      - key: JIRA_URL
+        value: https://ferco-medical.atlassian.net
+      - key: JIRA_EMAIL
+        sync: false
+      - key: JIRA_TOKEN
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: "1"
+
+  - type: web
+    name: ferco-assets
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # El frontend llama a /api/... relativo; Render lo reenvía al backend (mismo dominio => la cookie de sesión funciona)
+      # Si Render le asigna otra URL al backend, actualizar este destino.
+      - type: rewrite
+        source: /api/*
+        destination: https://ferco-assets-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
