@@ -34,7 +34,7 @@ git push -u origin main
 3. Completar las variables que pide (`sync: false`):
    - `DATABASE_URL` → la connection string de Neon
    - `JIRA_EMAIL`, `JIRA_TOKEN` → los mismos de tu `backend/.env`
-   - `ADMIN_PASSWORD` → solo se usa si el usuario admin no existe (con la migración ya existe)
+   - `ADMIN_PASSWORD` → **obligatorio**. Es la contraseña de la única cuenta (`dcasas@ferco-medical.com`): al arrancar, si no coincide con la guardada, la reemplaza. Cambiarla aquí y reiniciar el servicio cambia la contraseña. Usa una larga y única.
 4. Verificar la URL que Render le dio al backend (`ferco-assets-api`). Si **no** es `https://ferco-assets-api.onrender.com`, editar el destino de la regla `/api/*` en `render.yaml`, hacer commit y push.
 5. Abrir la URL del frontend (`https://ferco-assets.onrender.com` o similar) e iniciar sesión.
 

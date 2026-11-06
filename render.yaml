@@ -27,6 +27,9 @@ services:
         generateValue: true
       - key: SESSION_COOKIE_SECURE
         value: "1"
+      # IP real del cliente (detrás del proxy de Render) para el límite de intentos de login
+      - key: TRUST_PROXY
+        value: "1"
 
   - type: web
     name: ferco-assets

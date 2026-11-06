@@ -34,17 +34,44 @@ CORS(app, origins=Config.CORS_ORIGINS)
 
 db.init_app(app)
 
+# Detrás del proxy de Render, la IP real del cliente llega en X-Forwarded-For
+if os.getenv('TRUST_PROXY', '0') == '1':
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# La plataforma tiene una única cuenta de acceso.
+ADMIN_EMAIL = 'dcasas@ferco-medical.com'
+
 with app.app_context():
     db.create_all()
-    admin = User.query.filter_by(email='dcasas@ferco-medical.com').first()
+    admin_password = os.getenv('ADMIN_PASSWORD', '').strip()
+    admin = User.query.filter_by(email=ADMIN_EMAIL).first()
     if not admin:
-        admin = User(email='dcasas@ferco-medical.com', display_name='Diego Casas')
-        admin.set_password(os.getenv('ADMIN_PASSWORD', 'admin123'))
-        db.session.add(admin)
+        # En la nube (DATABASE_URL definido) no se crea la cuenta con una contraseña por defecto.
+        if not admin_password and os.getenv('DATABASE_URL'):
+            logger.error('ADMIN_PASSWORD no está definido: no se creó la cuenta de acceso.')
+        else:
+            admin = User(email=ADMIN_EMAIL, display_name='Diego Casas')
+            admin.set_password(admin_password or 'admin123')
+            db.session.add(admin)
+            db.session.commit()
+    elif admin_password and not admin.check_password(admin_password):
+        # ADMIN_PASSWORD manda: cambiarlo en el .env / Render cambia la contraseña al reiniciar.
+        admin.set_password(admin_password)
         db.session.commit()
+        logger.info('Contraseña de la cuenta actualizada desde ADMIN_PASSWORD.')
 
 # Estado global de sincronización
 _sync_status = {'running': False, 'sync_id': None}
+
+# Algunos tipos de Jira tienen el atributo de referencia mal escrito ("Usuario Finall").
+# Se unifica al nombre que usa la UI para que cada vínculo exista una sola vez.
+RELATION_TYPE_ALIASES = {'Usuario Finall': 'Usuario Final'}
+
+
+def canonical_relation_type(name: str) -> str:
+    name = str(name).strip()
+    return RELATION_TYPE_ALIASES.get(name, name)
 
 
 @app.before_request
@@ -55,13 +82,81 @@ def require_login():
         return jsonify({'status': 'error', 'message': 'Inicia sesión para continuar'}), 401
 
 
+# ---------------------------------------------------------------------------
+# Límite de intentos de inicio de sesión (protección contra fuerza bruta).
+# - Por IP: 5 fallos en 15 min bloquean esa IP 15 min.
+# - Por cuenta: 10 fallos en 15 min (desde cualquier IP) bloquean la cuenta 15 min,
+#   para frenar ataques que rotan de IP.
+# Se guarda en memoria (gunicorn corre con un solo worker); un reinicio lo limpia.
+# ---------------------------------------------------------------------------
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_LOCK_SECONDS = 15 * 60
+LOGIN_MAX_FAILS_PER_IP = 5
+LOGIN_MAX_FAILS_PER_ACCOUNT = 10
+_login_fails = {}    # clave -> lista de timestamps de fallos recientes
+_login_locked = {}   # clave -> timestamp hasta el que está bloqueada
+_login_lock = threading.Lock()
+
+
+def _login_keys(email):
+    return {'ip': f'ip:{request.remote_addr}', 'account': f'account:{email}'}
+
+
+def _login_locked_seconds(keys):
+    now = time.time()
+    with _login_lock:
+        remaining = max((_login_locked.get(k, 0) - now for k in keys.values()), default=0)
+    return int(remaining) if remaining > 0 else 0
+
+
+def _register_login_failure(keys):
+    now = time.time()
+    limits = {'ip': LOGIN_MAX_FAILS_PER_IP, 'account': LOGIN_MAX_FAILS_PER_ACCOUNT}
+    with _login_lock:
+        for kind, key in keys.items():
+            recent = [t for t in _login_fails.get(key, []) if now - t < LOGIN_WINDOW_SECONDS] + [now]
+            _login_fails[key] = recent
+            if len(recent) >= limits[kind]:
+                _login_locked[key] = now + LOGIN_LOCK_SECONDS
+                _login_fails.pop(key, None)
+                logger.warning(f'Inicio de sesión bloqueado ({key}) por demasiados intentos fallidos')
+
+
+def _clear_login_failures(keys):
+    with _login_lock:
+        for key in keys.values():
+            _login_fails.pop(key, None)
+
+
+def _too_many_attempts(seconds):
+    minutes = max(1, -(-seconds // 60))
+    return jsonify({
+        'status': 'error',
+        'message': f'Demasiados intentos fallidos. Vuelve a intentarlo en {minutes} min.'
+    }), 429
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json(silent=True) or {}
-    email = data.get('email', '').strip().lower()
-    user = User.query.filter_by(email=email).first()
-    if not user or not user.check_password(data.get('password', '')):
+    email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', ''))
+    keys = _login_keys(email)
+
+    locked = _login_locked_seconds(keys)
+    if locked:
+        return _too_many_attempts(locked)
+
+    user = User.query.filter_by(email=email).first() if email == ADMIN_EMAIL else None
+    if not user or not user.check_password(password):
+        _register_login_failure(keys)
+        time.sleep(0.5)  # frena los intentos automatizados
+        locked = _login_locked_seconds(keys)
+        if locked:
+            return _too_many_attempts(locked)
         return jsonify({'status': 'error', 'message': 'Correo o contraseña incorrectos'}), 401
+
+    _clear_login_failures(keys)
     session.clear()
     session['user_id'] = user.id
     return jsonify({'status': 'success', 'data': user.to_dict()}), 200
@@ -71,7 +166,7 @@ def login():
 def current_user():
     user_id = session.get('user_id')
     user = User.query.get(user_id) if user_id else None
-    if not user:
+    if not user or user.email != ADMIN_EMAIL:
         return jsonify({'status': 'error', 'message': 'Sesión no iniciada'}), 401
     return jsonify({'status': 'success', 'data': user.to_dict()}), 200
 
@@ -208,7 +303,11 @@ def _run_sync(sync_log_id: int):
             db.session.commit()
             logger.info(f"✓ {assets_created} creados, {assets_updated} actualizados")
 
-            # Relaciones (via atributos de referencia en los objetos)
+            # Relaciones (via atributos de referencia en los objetos).
+            # Jira es la fuente de verdad: para cada objeto se calcula el conjunto actual de
+            # referencias (con el NOMBRE del atributo como relation_type, no su ID numérico) y se
+            # reemplazan las relaciones locales salientes de ese objeto, eliminando duplicados y
+            # referencias que ya no existen en Jira (p. ej. un equipo reasignado a otro usuario).
             relations_count = 0
             for obj in raw_objects:
                 source_id = str(obj.get('id', ''))
@@ -216,26 +315,33 @@ def _run_sync(sync_log_id: int):
                 if not source:
                     continue
 
+                type_id = str(obj.get('objectType', {}).get('id', obj.get('typeId', '')))
+                attr_names = attr_names_by_type.get(type_id, {})
+                wanted = set()
                 for attr in obj.get('attributes', []):
+                    attr_id = str(attr.get('objectTypeAttributeId', ''))
+                    rel_type = canonical_relation_type(attr_names.get(attr_id) or attr_id or 'referencia')
                     for val in attr.get('objectAttributeValues', []):
                         if val.get('referencedType') and val.get('referencedObject'):
                             target_jira_id = str(val['referencedObject'].get('id', ''))
                             target = Asset.query.filter_by(jira_id=target_jira_id).first()
-                            if not target:
-                                continue
-                            rel_type = str(attr.get('objectTypeAttributeId', 'referencia'))
-                            existing_rel = AssetRelation.query.filter_by(
-                                source_asset_id=source.id,
-                                target_asset_id=target.id,
-                                relation_type=rel_type
-                            ).first()
-                            if not existing_rel:
-                                db.session.add(AssetRelation(
-                                    source_asset_id=source.id,
-                                    target_asset_id=target.id,
-                                    relation_type=rel_type
-                                ))
-                                relations_count += 1
+                            if target:
+                                wanted.add((target.id, rel_type))
+
+                current = {}
+                for rel in AssetRelation.query.filter_by(source_asset_id=source.id).all():
+                    key = (rel.target_asset_id, rel.relation_type)
+                    if key in wanted and key not in current:
+                        current[key] = rel
+                    else:
+                        db.session.delete(rel)
+                for target_id, rel_type in wanted - set(current):
+                    db.session.add(AssetRelation(
+                        source_asset_id=source.id,
+                        target_asset_id=target_id,
+                        relation_type=rel_type
+                    ))
+                    relations_count += 1
 
             db.session.commit()
 
@@ -296,7 +402,7 @@ def _run_sync(sync_log_id: int):
             duration = time.time() - start_time
             sync_log.status = 'success'
             sync_log.total_assets = assets_created + assets_updated
-            sync_log.total_relations = relations_count
+            sync_log.total_relations = AssetRelation.query.count()
             sync_log.duration_seconds = duration
             db.session.commit()
             logger.info(f"✓ Sync completado en {duration:.1f}s")
@@ -641,15 +747,64 @@ def get_assets_hierarchy():
 
 @app.route('/api/search/suggestions', methods=['GET'])
 def search_suggestions():
-    """Sugerencias por nombre, priorizando coincidencias al inicio."""
+    """Autocompletado desde la primera letra.
+
+    Busca en nombre, clave (ACTI-xxx) y valores de atributos (DNI, N° de serie, IMEI...).
+    Varias palabras se combinan con AND ("cas die" encuentra "CASAS PARISACA DIEGO").
+    Orden: nombre que empieza por el texto, palabra del nombre que empieza por el texto,
+    clave que empieza por el texto, y luego el resto. `type_id` limita a un tipo de objeto.
+    """
     query = request.args.get('q', '', type=str).strip()
-    if len(query) < 2:
-        return jsonify({'status': 'success', 'data': []}), 200
-    starts_with = Asset.name.ilike(f'{query}%')
-    matches = Asset.query.filter(Asset.name.ilike(f'%{query}%')).order_by(
-        db.case((starts_with, 0), else_=1), Asset.name
-    ).limit(12).all()
-    return jsonify({'status': 'success', 'data': [asset.to_dict() for asset in matches]}), 200
+    type_id = request.args.get('type_id', None, type=int)
+    limit = min(max(request.args.get('limit', 8, type=int), 1), 50)
+    if not query:
+        return jsonify({'status': 'success', 'data': [], 'total': 0}), 200
+
+    attributes_text = db.cast(Asset.attributes, db.Text)
+    base = Asset.query
+    if type_id:
+        base = base.filter(Asset.type_id == type_id)
+    for token in query.split():
+        base = base.filter(db.or_(
+            Asset.name.ilike(f'%{token}%'),
+            Asset.jira_key.ilike(f'%{token}%'),
+            attributes_text.ilike(f'%{token}%')
+        ))
+
+    name_has_all_tokens = db.and_(*[Asset.name.ilike(f'%{token}%') for token in query.split()])
+    rank = db.case(
+        (Asset.jira_key.ilike(query), 0),
+        (Asset.name.ilike(f'{query}%'), 1),
+        (Asset.name.ilike(f'% {query}%'), 2),
+        (Asset.jira_key.ilike(f'{query}%'), 3),
+        (name_has_all_tokens, 4),
+        else_=5
+    )
+    total = base.count()
+    matches = base.order_by(rank, Asset.name).limit(limit).all()
+
+    def matched_field(asset):
+        """Si la coincidencia no está en nombre ni clave, indica en qué atributo está."""
+        tokens = [t.lower() for t in query.split()]
+        visible = f'{asset.name} {asset.jira_key}'.lower()
+        if all(t in visible for t in tokens):
+            return None
+        for name, value in (asset.attributes or {}).items():
+            text = ', '.join(map(str, value)) if isinstance(value, list) else str(value or '')
+            if any(t in text.lower() for t in tokens) and not text.startswith('data:'):
+                # Algunos atributos llegan de Jira con su ID numérico como nombre: no se muestra.
+                return {'name': None if str(name).isdigit() else name, 'value': text[:80]}
+        return None
+
+    data = [{
+        'id': asset.id,
+        'jira_key': asset.jira_key,
+        'name': asset.name,
+        'type_id': asset.type_id,
+        'type_name': asset.asset_type.name if asset.asset_type else None,
+        'matched_field': matched_field(asset)
+    } for asset in matches]
+    return jsonify({'status': 'success', 'data': data, 'total': total}), 200
 
 
 @app.route('/api/search', methods=['GET'])

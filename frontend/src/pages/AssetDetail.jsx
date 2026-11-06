@@ -15,12 +15,12 @@ const fieldLabel = (field) => field === ACCOUNTING_CODE_FIELD ? ACCOUNTING_CODE_
 const iconFor = (name = '') => /laptop|all in one/i.test(name) ? '💻' : /celular|móvil|tablet/i.test(name) ? '📱' : /software|office|windows/i.test(name) ? '💿' : /usuario/i.test(name) ? '👤' : '▣'
 const display = (value) => Array.isArray(value) ? value.join(', ') : String(value || '')
 
-export default function AssetDetail() {
-  const { id } = useParams(); const [asset, setAsset] = useState(null); const [loading, setLoading] = useState(true); const [tab, setTab] = useState('details'); const [message, setMessage] = useState(''); const [touched, setTouched] = useState({})
+export default function AssetDetail({ assetId, embedded = false, onChanged }) {
+  const params = useParams(); const id = assetId ?? params.id; const [asset, setAsset] = useState(null); const [loading, setLoading] = useState(true); const [tab, setTab] = useState('details'); const [message, setMessage] = useState(''); const [touched, setTouched] = useState({})
   const load = () => axios.get(`/api/assets/${id}`).then(r => setAsset(r.data.data)).catch(console.error).finally(() => setLoading(false))
   useEffect(() => { setLoading(true); setTouched({}); load() }, [id])
   const markTouched = (field) => setTouched(current => current[field] ? current : { ...current, [field]: true })
-  const save = async (payload) => { try { await axios.put(`/api/assets/${id}`, payload); await load(); setMessage('Guardado'); setTimeout(() => setMessage(''), 1800) } catch { setMessage('No se pudo guardar') } }
+  const save = async (payload) => { try { await axios.put(`/api/assets/${id}`, payload); await load(); if (payload.name !== undefined) onChanged?.(); setMessage('Guardado'); setTimeout(() => setMessage(''), 1800) } catch { setMessage('No se pudo guardar') } }
   if (loading) return <div className="detail-loading">Cargando objeto…</div>
   if (!asset) return <div className="detail-loading">No se encontró este objeto.</div>
   const isUser = asset.type_name === 'Usuario'; const attributes = asset.attributes || {}
@@ -66,9 +66,9 @@ export default function AssetDetail() {
     const value = display(attributes[field])
     return <div className="field-with-check" onFocusCapture={() => markTouched(field)} onClickCapture={() => markTouched(field)}><input value={value} placeholder="Añadir información" onChange={e => setAsset(current => ({ ...current, attributes: { ...current.attributes, [field]: e.target.value } }))} onBlur={e => save({ attributes: { [field]: e.target.value } })} />{value && touched[field] && check()}</div>
   }
-  return <div className="detail-screen">
+  return <div className={embedded ? 'detail-screen detail-embedded' : 'detail-screen'}>
     <div className="detail-breadcrumb"><Link to="/assets">Activos de TI</Link><span>/</span><Link to={`/assets?type=${asset.type_id}`}>{asset.type_name}</Link><span>/</span>{asset.jira_key}</div>
-    <div className="detail-heading"><div className="detail-heading-name"><span>{iconFor(asset.type_name)}</span><input className="asset-name-input" value={asset.name} onChange={e => setAsset({ ...asset, name: e.target.value })} onBlur={e => save({ name: e.target.value })} />{asset.name && check()}</div><div className="detail-actions"><span className="save-message">{message}</span><button title="Copiar enlace">↗</button><button title="Más acciones">•••</button></div></div>
+    <div className="detail-heading"><div className="detail-heading-name"><span>{iconFor(asset.type_name)}</span><input className="asset-name-input" value={asset.name} onChange={e => setAsset({ ...asset, name: e.target.value })} onBlur={e => save({ name: e.target.value })} />{asset.name && check()}</div><div className="detail-actions"><span className="save-message">{message}</span>{embedded ? <Link className="detail-open-full" to={`/assets/${asset.id}`} title="Abrir en página completa">↗</Link> : <button title="Copiar enlace">↗</button>}<button title="Más acciones">•••</button></div></div>
     <div className="detail-grid"><section className="detail-main"><div className="detail-tabs"><button className={tab === 'details' ? 'active' : ''} onClick={() => setTab('details')}>Detalles</button><button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}>Actividad</button></div>
       {tab === 'details' ? <div className="detail-properties">{fields.map(field => <div className="detail-property editable-property" key={field}><dt>{fieldLabel(field)}</dt><dd>{valueControl(field)}</dd></div>)}</div> : <div className="detail-activity">
         {asset.activities?.length ? asset.activities.map(a => <div className="activity-entry" key={a.id}>

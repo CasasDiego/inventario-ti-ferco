@@ -47,7 +47,8 @@ JIRA_WORKSPACE_ID=       # optional — auto-detected from JIRA_URL if omitted
 DATABASE_URL=             # empty = SQLite at instance/jira_assets.db; production = Postgres URL
 SECRET_KEY=
 SESSION_COOKIE_SECURE=0   # 1 behind HTTPS
-ADMIN_PASSWORD=           # only used to seed the admin user if missing
+ADMIN_PASSWORD=           # password of the single account; if set, overwrites the stored hash on startup
+TRUST_PROXY=0             # 1 behind a reverse proxy (Render) so login rate limiting sees the real client IP
 ```
 See `backend/.env.example`.
 
@@ -62,7 +63,7 @@ Production runs on Postgres (Neon/Supabase) via `DATABASE_URL` + Render (`render
 1. `backend/export_jira.py` (`JiraAssetsExporter`) is the only code that talks to the real Jira Assets API. It resolves the workspace ID, queries object schemas/types/attribute definitions, and pulls all objects via AQL (`POST /object/aql`) with pagination. `normalize_object()` converts Jira's raw attribute-value structure into a flat `{attr_name: value}` dict using the attribute-definition map (attribute IDs → human-readable names).
 2. `backend/app.py`'s `_run_sync()` (triggered by `POST /api/sync`, runs in a background thread, tracked via the in-memory `_sync_status` dict and persisted `SyncLog` rows) drives the exporter, upserts `AssetType` and `Asset` rows by `jira_type_id`/`jira_id`, and separately walks each object's `objectAttributeValues` looking for `referencedObject` links to build `AssetRelation` rows. This is the only place Jira data enters the local DB — everything else in the API reads/writes only the local SQLite copy.
 3. `backend/models.py` defines the local schema: `User` (local login only, unrelated to Jira), `AssetType`, `Asset` (self-referential `parent_id` for hierarchy, `attributes` as a JSON blob, unique on `jira_id`), `AssetRelation` (directed source→target links with a free-text `relation_type`), `SyncLog`.
-4. `backend/app.py` exposes REST endpoints over that local DB (assets CRUD, search, CSV export, hierarchy tree, relations, sync trigger/status/logs). Session-based auth (`flask.session`) gates every `/api/*` route except `/api/health`, `/api/auth/login`, `/api/auth/me` — see `require_login()`.
+4. `backend/app.py` exposes REST endpoints over that local DB (assets CRUD, search, CSV export, hierarchy tree, relations, sync trigger/status/logs). Session-based auth (`flask.session`) gates every `/api/*` route except `/api/health`, `/api/auth/login`, `/api/auth/me` — see `require_login()`. There is intentionally a single account (`ADMIN_EMAIL`); `/api/auth/login` has in-memory brute-force limits (5 fails/IP, 10 fails/account per 15 min → 15 min lock).
 5. `frontend/src/App.jsx` checks `/api/auth/me` on load to decide between `Login` and the routed app (`Dashboard`, `AssetsList`, `AssetDetail`, `AssetHierarchy`) under `react-router-dom`. Pages call the API directly with `axios` (no client-side state library) using relative `/api/...` paths, relying on the Vite proxy in dev and same-origin nginx in Docker.
 
 ### Key implication for changes
