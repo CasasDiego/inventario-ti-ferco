@@ -97,7 +97,9 @@ class JiraAssetsExporter:
     def get_attribute_definitions(self, object_type_id: str) -> Dict:
         """Obtiene las definiciones de atributos de un tipo de objeto (para mapear IDs a nombres)"""
         try:
-            r = self.session.get(f"{self.api_base}/objecttypeattribute/{object_type_id}", timeout=10)
+            # Ojo: /objecttypeattribute/{id} devuelve UN atributo por su propio ID; la lista de
+            # atributos de un tipo de objeto está en /objecttype/{id}/attributes.
+            r = self.session.get(f"{self.api_base}/objecttype/{object_type_id}/attributes", timeout=10)
             if r.status_code == 200:
                 attrs = r.json()
                 return {str(a['id']): a.get('name', f'attr_{a["id"]}') for a in attrs}

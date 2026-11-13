@@ -67,11 +67,77 @@ _sync_status = {'running': False, 'sync_id': None}
 # Algunos tipos de Jira tienen el atributo de referencia mal escrito ("Usuario Finall").
 # Se unifica al nombre que usa la UI para que cada vínculo exista una sola vez.
 RELATION_TYPE_ALIASES = {'Usuario Finall': 'Usuario Final'}
+# Atributos de sistema de Jira que la app ya guarda en columnas propias (jira_key, fechas).
+JIRA_SYSTEM_ATTRIBUTES = {'Key', 'Created', 'Updated'}
 
 
 def canonical_relation_type(name: str) -> str:
     name = str(name).strip()
     return RELATION_TYPE_ALIASES.get(name, name)
+
+
+def merge_jira_attributes(current, from_jira):
+    """Combina los atributos locales con los que llegan de Jira (Jira gana).
+
+    - Los nombres se unifican ("Usuario Finall" -> "Usuario Final").
+    - Se descartan claves numéricas: son IDs de atributo que quedaron de sincronizaciones
+      anteriores en las que no se pudo resolver el nombre, y duplicaban campos.
+    - Se omiten Key/Created/Updated (ya están en jira_key y las fechas del activo).
+    - Se conservan los atributos locales que Jira no trae (p. ej. la foto del código contable).
+    """
+    skip = lambda name: str(name).isdigit() or name in JIRA_SYSTEM_ATTRIBUTES
+    merged = {k: v for k, v in (current or {}).items() if not skip(k)}
+    for name, value in (from_jira or {}).items():
+        if not skip(name):
+            merged[canonical_relation_type(name)] = value
+    return merged
+
+
+def refresh_relations(raw_objects, attr_names_by_type):
+    """Deja en la base exactamente las referencias que hay hoy en Jira.
+
+    Para cada objeto de Jira calcula sus referencias actuales (relation_type = NOMBRE del
+    atributo, no su ID numérico) y reemplaza las relaciones salientes locales de ese objeto:
+    elimina duplicados y referencias que ya no existen en Jira (p. ej. un equipo que se
+    reasignó a otro usuario). Devuelve (relaciones_nuevas, relaciones_eliminadas).
+    """
+    asset_ids = dict(db.session.query(Asset.jira_id, Asset.id).all())
+    existing = {}
+    for rel in AssetRelation.query.all():
+        existing.setdefault(rel.source_asset_id, []).append(rel)
+
+    added = removed = 0
+    for obj in raw_objects:
+        source_id = asset_ids.get(str(obj.get('id', '')))
+        if not source_id:
+            continue
+
+        type_id = str(obj.get('objectType', {}).get('id', obj.get('typeId', '')))
+        attr_names = attr_names_by_type.get(type_id, {})
+        wanted = set()
+        for attr in obj.get('attributes', []):
+            attr_id = str(attr.get('objectTypeAttributeId', ''))
+            rel_type = canonical_relation_type(attr_names.get(attr_id) or attr_id or 'referencia')
+            for val in attr.get('objectAttributeValues', []):
+                if val.get('referencedType') and val.get('referencedObject'):
+                    target_id = asset_ids.get(str(val['referencedObject'].get('id', '')))
+                    if target_id:
+                        wanted.add((target_id, rel_type))
+
+        kept = set()
+        for rel in existing.get(source_id, []):
+            key = (rel.target_asset_id, rel.relation_type)
+            if key in wanted and key not in kept:
+                kept.add(key)
+            else:
+                db.session.delete(rel)
+                removed += 1
+        for target_id, rel_type in wanted - kept:
+            db.session.add(AssetRelation(source_asset_id=source_id, target_asset_id=target_id, relation_type=rel_type))
+            added += 1
+
+    db.session.commit()
+    return added, removed
 
 
 @app.before_request
@@ -285,7 +351,7 @@ def _run_sync(sync_log_id: int):
                 existing = Asset.query.filter_by(jira_id=normalized['id']).first()
                 if existing:
                     existing.name = normalized['label']
-                    existing.attributes = {**(existing.attributes or {}), **normalized['attributes']}
+                    existing.attributes = merge_jira_attributes(existing.attributes, normalized['attributes'])
                     existing.jira_updated_at = jira_updated or datetime.utcnow()
                     assets_updated += 1
                 else:
@@ -294,7 +360,7 @@ def _run_sync(sync_log_id: int):
                         jira_key=normalized['key'],
                         name=normalized['label'],
                         type_id=asset_type.id,
-                        attributes=normalized['attributes'],
+                        attributes=merge_jira_attributes({}, normalized['attributes']),
                         jira_created_at=jira_created or datetime.utcnow(),
                         jira_updated_at=jira_updated or datetime.utcnow()
                     ))
@@ -303,47 +369,9 @@ def _run_sync(sync_log_id: int):
             db.session.commit()
             logger.info(f"✓ {assets_created} creados, {assets_updated} actualizados")
 
-            # Relaciones (via atributos de referencia en los objetos).
-            # Jira es la fuente de verdad: para cada objeto se calcula el conjunto actual de
-            # referencias (con el NOMBRE del atributo como relation_type, no su ID numérico) y se
-            # reemplazan las relaciones locales salientes de ese objeto, eliminando duplicados y
-            # referencias que ya no existen en Jira (p. ej. un equipo reasignado a otro usuario).
-            relations_count = 0
-            for obj in raw_objects:
-                source_id = str(obj.get('id', ''))
-                source = Asset.query.filter_by(jira_id=source_id).first()
-                if not source:
-                    continue
-
-                type_id = str(obj.get('objectType', {}).get('id', obj.get('typeId', '')))
-                attr_names = attr_names_by_type.get(type_id, {})
-                wanted = set()
-                for attr in obj.get('attributes', []):
-                    attr_id = str(attr.get('objectTypeAttributeId', ''))
-                    rel_type = canonical_relation_type(attr_names.get(attr_id) or attr_id or 'referencia')
-                    for val in attr.get('objectAttributeValues', []):
-                        if val.get('referencedType') and val.get('referencedObject'):
-                            target_jira_id = str(val['referencedObject'].get('id', ''))
-                            target = Asset.query.filter_by(jira_id=target_jira_id).first()
-                            if target:
-                                wanted.add((target.id, rel_type))
-
-                current = {}
-                for rel in AssetRelation.query.filter_by(source_asset_id=source.id).all():
-                    key = (rel.target_asset_id, rel.relation_type)
-                    if key in wanted and key not in current:
-                        current[key] = rel
-                    else:
-                        db.session.delete(rel)
-                for target_id, rel_type in wanted - set(current):
-                    db.session.add(AssetRelation(
-                        source_asset_id=source.id,
-                        target_asset_id=target_id,
-                        relation_type=rel_type
-                    ))
-                    relations_count += 1
-
-            db.session.commit()
+            # Relaciones (via atributos de referencia): Jira es la fuente de verdad.
+            relations_count, relations_removed = refresh_relations(raw_objects, attr_names_by_type)
+            logger.info(f"✓ Relaciones: {relations_count} nuevas, {relations_removed} eliminadas")
 
             # Historial de actividad de cada objeto (creación, cambios de atributos, etc.)
             known_history_ids = {row[0] for row in db.session.query(AssetActivity.jira_history_id).all()}
