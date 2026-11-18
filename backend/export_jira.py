@@ -24,15 +24,15 @@ class JiraAssetsExporter:
         self.api_token = api_token
         self.verbose = verbose
 
-        self.workspace_id = workspace_id or self._fetch_workspace_id()
-        if not self.workspace_id:
-            raise ValueError("No se pudo obtener el Workspace ID. Configura JIRA_WORKSPACE_ID en .env")
-
-        self.api_base = f"https://api.atlassian.com/jsm/assets/workspace/{self.workspace_id}/v1"
-
         self.session = requests.Session()
         self.session.auth = (email, api_token)
         self.session.headers.update({'Accept': 'application/json', 'Content-Type': 'application/json'})
+
+        self.workspace_id = workspace_id or self._fetch_workspace_id()
+        if not self.workspace_id:
+            raise ValueError("No se pudo obtener el Workspace ID. Revisa JIRA_EMAIL y JIRA_TOKEN (o configura JIRA_WORKSPACE_ID)")
+
+        self.api_base = f"https://api.atlassian.com/jsm/assets/workspace/{self.workspace_id}/v1"
 
         if verbose:
             logger.setLevel(logging.DEBUG)

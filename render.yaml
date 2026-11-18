@@ -17,6 +17,8 @@ services:
         sync: false
       - key: JIRA_URL
         value: https://ferco-medical.atlassian.net
+      - key: JIRA_WORKSPACE_ID
+        value: cd5199e4-fe3a-4a5b-94f6-1e3c4c10a365
       - key: JIRA_EMAIL
         sync: false
       - key: JIRA_TOKEN
