@@ -1,8 +1,10 @@
 import React, { useState } from 'react'
 import axios from 'axios'
+import usePageTitle from '../hooks/usePageTitle'
 import logo from '../../img/Ferco-logo.png'
 
 export default function Login({ onLogin }) {
+  usePageTitle('Iniciar sesión')
   const [email, setEmail] = useState(localStorage.getItem('ferco_email') || 'dcasas@ferco-medical.com')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')

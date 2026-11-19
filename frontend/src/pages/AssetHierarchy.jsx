@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import usePageTitle from '../hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 
 export default function AssetHierarchy() {
+  usePageTitle('Jerarquía')
   const [hierarchy, setHierarchy] = useState([])
   const [loading, setLoading] = useState(true)
   const [expandedNodes, setExpandedNodes] = useState(new Set())

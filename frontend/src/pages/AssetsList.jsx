@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import AssetDetail from './AssetDetail'
 import SearchBox from '../components/SearchBox'
+import usePageTitle from '../hooks/usePageTitle'
 
 const iconFor = (name = '') => /laptop|all in one/i.test(name) ? '💻' : /celular|móvil|tablet/i.test(name) ? '📱' : /software|office|windows/i.test(name) ? '💿' : /impresora/i.test(name) ? '🖨️' : /usuario/i.test(name) ? '👤' : '▣'
 
@@ -45,6 +46,8 @@ export default function AssetsList() {
   }, [params.get('page'), params.get('search'), selectedType, perPage, reloadKey])
 
   const selectedName = useMemo(() => types.find((type) => String(type.id) === selectedType)?.name || 'Todos los activos', [types, selectedType])
+  // En vista dividida con un objeto abierto, el título lo pone el detalle ([ACTI-xxx] Nombre).
+  usePageTitle(splitView && selectedObject ? null : params.get('search') ? `Búsqueda: ${params.get('search')}` : selectedName)
   const groups = useMemo(() => {
     const hardware = /^(CPU|Laptop|Impresoras|All In One|Celular|Proyectores|Monitor|Almacenamiento|Dispositivos de Red|Tablet|Servidores)$/i
     const software = /office|windows|software|ms 365/i

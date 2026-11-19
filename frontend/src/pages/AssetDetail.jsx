@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
 import ReferenceField from '../components/ReferenceField'
+import usePageTitle from '../hooks/usePageTitle'
 
 const USER_FIELDS = ['DOC DE IDENTIDAD', 'APELLIDOS Y NOMBRES', 'Estado', 'FECHA DE INGRESO', 'CARGO', 'AREA DE TRABAJO', 'JEFE INMEDIATO', 'CARGO DEL JEFE INMEDIATO', 'CORREO PERSONAL', 'TELEFONO PERSONAL', 'CORREO DE LA EMPRESA', 'CONTRASEÑA DE CORREO', 'Código de recuperación MFA']
 const EQUIPMENT_FIELDS = ['Estado del Equipo', 'IP', 'Modelo de equipo', 'Observaciones', 'Usuario Final', 'Fabricante', 'N° Serie', 'IMEI', 'Licencia Office 2013', 'Licencia Office 2016', 'Licencia Office 2019', 'Licencia M365 PBI 1', 'Licencia M365 PBI 2', 'Licencia M365 PBI 3', 'Anydesk']
@@ -19,6 +20,8 @@ export default function AssetDetail({ assetId, embedded = false, onChanged }) {
   const params = useParams(); const id = assetId ?? params.id; const [asset, setAsset] = useState(null); const [loading, setLoading] = useState(true); const [tab, setTab] = useState('details'); const [message, setMessage] = useState(''); const [touched, setTouched] = useState({})
   const load = () => axios.get(`/api/assets/${id}`).then(r => setAsset(r.data.data)).catch(console.error).finally(() => setLoading(false))
   useEffect(() => { setLoading(true); setTouched({}); load() }, [id])
+  // Título de la pestaña al estilo Jira: "[ACTI-100] HP ALL IN ONE 22 DD1518LA"
+  usePageTitle(asset && String(asset.id) === String(id) ? `[${asset.jira_key}] ${asset.name}` : null)
   const markTouched = (field) => setTouched(current => current[field] ? current : { ...current, [field]: true })
   const save = async (payload) => { try { await axios.put(`/api/assets/${id}`, payload); await load(); if (payload.name !== undefined) onChanged?.(); setMessage('Guardado'); setTimeout(() => setMessage(''), 1800) } catch { setMessage('No se pudo guardar') } }
   if (loading) return <div className="detail-loading">Cargando objeto…</div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import usePageTitle from '../hooks/usePageTitle'
 import axios from 'axios'
 import { Link } from 'react-router-dom'
 
@@ -15,6 +16,7 @@ const ICONS = {
 const Icon = ({ name, className }) => <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">{ICONS[name]}</svg>
 
 export default function Dashboard({ stats, onSync }) {
+  usePageTitle('Resumen')
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
   const [lastSync, setLastSync] = useState(null)
