@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request, Response, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
-from models import db, User, AssetType, Asset, AssetRelation, AssetActivity, SyncLog
+from models import db, User, AssetType, Asset, AssetRelation, AssetActivity, AssetComment, SyncLog
 from export_jira import JiraAssetsExporter
 import json
 import logging
@@ -593,6 +593,8 @@ def get_asset(asset_id):
         asset_data['incoming_relations'] = incoming_data
         activities = AssetActivity.query.filter_by(asset_id=asset_id).order_by(AssetActivity.created_at.desc()).all()
         asset_data['activities'] = [a.to_dict() for a in activities]
+        comments = AssetComment.query.filter_by(asset_id=asset_id).order_by(AssetComment.created_at.desc()).all()
+        asset_data['comments'] = [c.to_dict() for c in comments]
 
         return jsonify({'status': 'success', 'data': asset_data}), 200
     except Exception as e:
@@ -690,6 +692,67 @@ def update_asset(asset_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ===========================
+# COMENTARIOS (pestaña Actividad)
+# ===========================
+
+COMMENT_MAX_LENGTH = 5000
+
+
+def _session_user():
+    user_id = session.get('user_id')
+    return User.query.get(user_id) if user_id else None
+
+
+def _comment_body():
+    body = str((request.get_json(silent=True) or {}).get('body', '')).strip()
+    if not body:
+        return None, (jsonify({'status': 'error', 'message': 'El comentario está vacío'}), 400)
+    if len(body) > COMMENT_MAX_LENGTH:
+        return None, (jsonify({'status': 'error', 'message': f'Máximo {COMMENT_MAX_LENGTH} caracteres'}), 400)
+    return body, None
+
+
+@app.route('/api/assets/<int:asset_id>/comments', methods=['POST'])
+def create_comment(asset_id):
+    if not Asset.query.get(asset_id):
+        return jsonify({'status': 'error', 'message': 'No encontrado'}), 404
+    body, error = _comment_body()
+    if error:
+        return error
+    user = _session_user()
+    comment = AssetComment(asset_id=asset_id, body=body,
+                           author_name=user.display_name if user else 'Usuario',
+                           author_email=user.email if user else None)
+    db.session.add(comment)
+    db.session.commit()
+    return jsonify({'status': 'success', 'data': comment.to_dict()}), 201
+
+
+@app.route('/api/comments/<int:comment_id>', methods=['PUT'])
+def update_comment(comment_id):
+    comment = AssetComment.query.get(comment_id)
+    if not comment:
+        return jsonify({'status': 'error', 'message': 'No encontrado'}), 404
+    body, error = _comment_body()
+    if error:
+        return error
+    comment.body = body
+    comment.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'status': 'success', 'data': comment.to_dict()}), 200
+
+
+@app.route('/api/comments/<int:comment_id>', methods=['DELETE'])
+def delete_comment(comment_id):
+    comment = AssetComment.query.get(comment_id)
+    if not comment:
+        return jsonify({'status': 'error', 'message': 'No encontrado'}), 404
+    db.session.delete(comment)
+    db.session.commit()
+    return jsonify({'status': 'success'}), 200
 
 
 @app.route('/api/assets/<int:asset_id>', methods=['DELETE'])

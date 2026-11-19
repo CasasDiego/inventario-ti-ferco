@@ -133,6 +133,33 @@ class AssetActivity(db.Model):
         }
 
 
+class AssetComment(db.Model):
+    """Comentario escrito en la plataforma sobre un Activo (pestaña Actividad).
+    Es solo local: la sincronización con Jira nunca lo toca."""
+    __tablename__ = 'asset_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=False, index=True)
+    author_name = db.Column(db.String(255), nullable=False)
+    author_email = db.Column(db.String(255))
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime)
+
+    asset = db.relationship('Asset', backref=db.backref('comments', lazy=True, cascade='all, delete-orphan'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'asset_id': self.asset_id,
+            'author_name': self.author_name,
+            'author_email': self.author_email,
+            'body': self.body,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class AssetRelation(db.Model):
     """Relaciones entre Activos"""
     __tablename__ = 'asset_relations'
