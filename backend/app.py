@@ -67,6 +67,17 @@ _sync_status = {'running': False, 'sync_id': None}
 # Algunos tipos de Jira tienen el atributo de referencia mal escrito ("Usuario Finall").
 # Se unifica al nombre que usa la UI para que cada vínculo exista una sola vez.
 RELATION_TYPE_ALIASES = {'Usuario Finall': 'Usuario Final'}
+# Campos de referencia editables con desplegable -> tipo de objeto de Jira que ofrecen.
+REFERENCE_FIELD_TYPES = {
+    'Usuario Final': 'Usuario',
+    'Fabricante': 'Marca',
+    'Licencia Office 2013': 'Microsoft Office 2013 Hogar y Empresa FPP-RETAIL',
+    'Licencia Office 2016': 'Microsoft Office 2016 Hogar y Empresa FPP-RETAIL',
+    'Licencia Office 2019': 'Microsoft Office 2019 Hogar y Student FPP-RETAIL',
+    'Licencia M365 PBI 1': 'MS 365 Business STD PBI 1',
+    'Licencia M365 PBI 2': 'MS 365 Business STD PBI 2',
+    'Licencia M365 PBI 3': 'MS 365 Business STD PBI 3',
+}
 # Atributos de sistema de Jira que la app ya guarda en columnas propias (jira_key, fechas).
 JIRA_SYSTEM_ATTRIBUTES = {'Key', 'Created', 'Updated'}
 
@@ -603,17 +614,37 @@ def get_asset(asset_id):
 
 @app.route('/api/assets/options', methods=['GET'])
 def asset_options():
-    """Opciones para campos de referencia (Usuario Final y Fabricante)."""
+    """Opciones del desplegable de un campo de referencia (Usuario Final, Fabricante, licencias...)."""
+    field = request.args.get('field', '').strip()
     kind = request.args.get('kind', '')
     query_text = request.args.get('q', '').strip()
-    type_name = {'users': 'Usuario', 'brands': 'Marca'}.get(kind)
+    type_name = REFERENCE_FIELD_TYPES.get(field) or {'users': 'Usuario', 'brands': 'Marca'}.get(kind)
     if not type_name:
-        return jsonify({'status': 'error', 'message': 'Tipo de opción no válido'}), 400
+        return jsonify({'status': 'error', 'message': 'Campo de referencia no válido'}), 400
     query = Asset.query.join(AssetType).filter(AssetType.name == type_name)
     if query_text:
-        query = query.filter(Asset.name.ilike(f'%{query_text}%'))
-    assets = query.order_by(Asset.name).limit(50).all()
-    return jsonify({'status': 'success', 'data': [a.to_dict() for a in assets]}), 200
+        like = f'%{query_text}%'
+        query = query.filter(db.or_(Asset.name.ilike(like), Asset.jira_key.ilike(like)))
+    assets = query.order_by(Asset.name).limit(300).all()
+
+    # Para licencias: en qué equipos está asignada cada una (como ayuda al elegir).
+    used_by = {}
+    if field and field not in ('Usuario Final', 'Fabricante') and assets:
+        rows = (db.session.query(AssetRelation.target_asset_id, Asset.name)
+                .join(Asset, Asset.id == AssetRelation.source_asset_id)
+                .filter(AssetRelation.relation_type == field,
+                        AssetRelation.target_asset_id.in_([a.id for a in assets])).all())
+        for target_id, source_name in rows:
+            used_by.setdefault(target_id, []).append(source_name)
+
+    data = []
+    for a in assets:
+        attrs = a.attributes or {}
+        detail = [str(attrs[k]) for k in ('DOC DE IDENTIDAD', 'Estado') if attrs.get(k)]
+        if a.id in used_by:
+            detail.append('Asignada a ' + ', '.join(used_by[a.id]))
+        data.append({'id': a.id, 'name': a.name, 'jira_key': a.jira_key, 'detail': ' · '.join(detail)})
+    return jsonify({'status': 'success', 'data': data}), 200
 
 
 @app.route('/api/assets', methods=['POST'])

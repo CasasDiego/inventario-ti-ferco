@@ -251,3 +251,21 @@ code {
 .comment-tools { margin-left: auto; display: flex; gap: 4px; }
 .comment-tools button { background: none; border: 0; color: #44546f; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 3px; }
 .comment-tools button:hover { background: #e9ebee; text-decoration: underline; }
+
+/* Desplegable de campos de referencia (Usuario Final, Fabricante, licencias) */
+.reference-control { align-items: center; }
+.reference-control input { padding-right: 52px; cursor: pointer; }
+.reference-open input { cursor: text; border-color: #0c66e4 !important; background: #fff !important; }
+.reference-control > .reference-clear { right: 26px; top: 4px; }
+.reference-chevron { position: absolute; right: 9px; top: 50%; transform: translateY(-60%); color: #6b778c; font-size: 14px; pointer-events: none; }
+.reference-control:hover .reference-chevron, .reference-open .reference-chevron { color: #172b4d; }
+.reference-options { max-height: 320px; }
+.reference-options button { display: flex; align-items: center; gap: 10px; }
+.reference-options button.active { background: #deebff; }
+.reference-options button.selected strong { color: #0c66e4; }
+.reference-options .reference-option-icon { display: inline; padding: 0; width: 18px; text-align: center; flex: none; }
+.reference-options .reference-option-text { display: flex; flex-direction: column; min-width: 0; padding: 0; color: #172b4d; font-size: 14px; }
+.reference-option-text strong { font-weight: 500; }
+.reference-option-text small { color: #6b778c; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reference-options .reference-option-check { display: inline; padding: 0; margin-left: auto; color: #0c66e4; font-weight: 700; }
+.reference-options .reference-empty { display: block; padding: 10px; color: #6b778c; font-size: 13px; }

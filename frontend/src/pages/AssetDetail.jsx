@@ -9,6 +9,8 @@ const USER_FIELDS = ['DOC DE IDENTIDAD', 'APELLIDOS Y NOMBRES', 'Estado', 'FECHA
 const EQUIPMENT_FIELDS = ['Estado del Equipo', 'IP', 'Modelo de equipo', 'Observaciones', 'Usuario Final', 'Fabricante', 'N° Serie', 'IMEI', 'Licencia Office 2013', 'Licencia Office 2016', 'Licencia Office 2019', 'Licencia M365 PBI 1', 'Licencia M365 PBI 2', 'Licencia M365 PBI 3', 'Anydesk']
 // El campo "Activo de Contabilidad" (nombre real del atributo en Jira) solo se muestra, con esta
 // etiqueta y su foto asociada, para los tipos de equipo que llevan código de contabilidad físico.
+// Campos que apuntan a otro objeto de Jira: se editan con un desplegable de opciones.
+const REFERENCE_FIELDS = ['Usuario Final', 'Fabricante', 'Licencia Office 2013', 'Licencia Office 2016', 'Licencia Office 2019', 'Licencia M365 PBI 1', 'Licencia M365 PBI 2', 'Licencia M365 PBI 3']
 const ACCOUNTING_CODE_FIELD = 'Activo de Contabilidad'
 const ACCOUNTING_CODE_LABEL = 'Código de activo de contabilidad'
 const ACCOUNTING_IMAGE_FIELD = 'Img de código de contabilidad'
@@ -35,9 +37,9 @@ export default function AssetDetail({ assetId, embedded = false, onChanged }) {
   const date = (value) => value ? new Intl.DateTimeFormat('es-PE', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value)) : '—'
   const check = () => <span className="field-check" title="Completo">✓</span>
   const valueControl = (field) => {
-    if (field === 'Usuario Final' || field === 'Fabricante') {
+    if (REFERENCE_FIELDS.includes(field)) {
       const ref = referenceFor(field)
-      return <div className="field-with-check" onFocusCapture={() => markTouched(field)} onClickCapture={() => markTouched(field)}><ReferenceField kind={field === 'Usuario Final' ? 'users' : 'brands'} value={ref ? { id: ref.target_asset_id, name: ref.target_asset_name } : null} onChange={option => save({ references: { [field]: option?.id || null } })} />{ref && touched[field] && check()}</div>
+      return <div className="field-with-check" onFocusCapture={() => markTouched(field)} onClickCapture={() => markTouched(field)}><ReferenceField field={field} value={ref ? { id: ref.target_asset_id, name: ref.target_asset_name } : null} onChange={option => save({ references: { [field]: option?.id || null } })} />{ref && touched[field] && check()}</div>
     }
     if (field === ACCOUNTING_IMAGE_FIELD) {
       const value = display(attributes[field])

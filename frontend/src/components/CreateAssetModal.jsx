@@ -157,7 +157,7 @@ export default function CreateAssetModal({ open, onClose, onCreated, initialType
                             {field.options.map((option) => <option key={option}>{option}</option>)}
                           </select>
                         ) : field.kind === 'reference' ? (
-                          <ReferenceField kind={field.refKind} value={values[field.name]} onChange={(option) => setValue(field.name, option)} />
+                          <ReferenceField field={field.name} value={values[field.name]} onChange={(option) => setValue(field.name, option)} />
                         ) : (
                           <input value={values[field.name] || ''} required={field.required} onChange={(e) => setValue(field.name, e.target.value)} />
                         )}
