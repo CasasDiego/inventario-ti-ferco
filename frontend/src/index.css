@@ -269,3 +269,10 @@ code {
 .reference-option-text small { color: #6b778c; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .reference-options .reference-option-check { display: inline; padding: 0; margin-left: auto; color: #0c66e4; font-weight: 700; }
 .reference-options .reference-empty { display: block; padding: 10px; color: #6b778c; font-size: 13px; }
+
+/* Campos editables estilo Jira: al pasar el mouse o hacer clic se sombrean en gris, sin borde azul */
+.editable-property input, .editable-property select, .asset-name-input { border-color: transparent; transition: background-color .12s ease; }
+.editable-property input:hover, .editable-property select:hover, .asset-name-input:hover { border-color: transparent; background: rgba(9, 30, 66, 0.08); }
+.editable-property input:focus, .editable-property select:focus, .asset-name-input:focus,
+.reference-open input { border-color: transparent !important; background: rgba(9, 30, 66, 0.13) !important; box-shadow: none; outline: 0; }
+.comment-placeholder:hover { border-color: #c1c7d0; background: rgba(9, 30, 66, 0.06); }
